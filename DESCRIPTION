@@ -1,0 +1,14 @@
+Package: modisclim
+Title: modisclim
+Version: 1.0.0
+Authors@R: person("First", "Last", email = "first.last@example.com", role = c("aut", "cre"))
+Description: Estimates air temperature and vapour pressure at surface from atmospheric profiles (M*D07) and cloud data(M*D06)
+Depends: R (>= 3.4.1)
+License: What license is it under?
+Encoding: UTF-8
+LazyData: true
+Author: David Sandoval <dsandovalhdh@gmail.com> [aut, cre]
+Maintainer: 'David Sandoval' <dsandovalhdh@gmail.com>
+Imports: raster, rgdal, doSNOW, gdalUtils, httr, soilDB
+ByteCompile: TRUE
+RoxygenNote: 6.1.1
