@@ -130,16 +130,26 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 				# get brightness temperature 37gz V polarization Holmes, et al. 2008 doi 10.1029/2008JD010257
 				if(DNB=='DB'|DNB=='D'){
 					url_file_SSM<-regmatches(unlist(url_file_SSM[,2]), gregexpr('.*.ML.*.A.*.37V.*.gz$', unlist(url_file_SSM[,2])))
+					# if(length(url_file_SSM>1)){
+					# 	url_file_SSM<-url_file_SSM[length(url_file_SSM)]
+					# }
 				}else{
 					url_file_SSM<-regmatches(unlist(url_file_SSM[,2]), gregexpr('.*.ML.*.D.*.37V.*.gz$', unlist(url_file_SSM[,2])))
+					# if(length(url_file_SSM>1)){
+					# 	url_file_SSM<-url_file_SSM[length(url_file_SSM)]
+					# }
 				}
 				
 				url_file_SSM<-do.call(c,url_file_SSM)
+				if(length(url_file_SSM)>1){
+					url_file_SSM<-url_file_SSM[length(url_file_SSM)]
+				}
 				return(paste0(dayurl,url_file_SSM))
 			}
 			
 		}
 		SSM_url<-mapply(get_ssmurl,urlsSSM,MoreArgs = list(DNB=DNB),SIMPLIFY = T)
+		SSM_url<-as.character(SSM_url)
 		SSM_url<-SSM_url[!is.na(SSM_url)]	
 		
 		
