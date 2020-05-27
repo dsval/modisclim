@@ -156,7 +156,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	pb <- txtProgressBar(min=1,max = length(file_urls[,1]), style = 3)
 	# Loop through all files
 	########################################################################
-	#2.download athmosphere
+	#2.download atmosphere
 	########################################################################
 	
 	cat('downloading atmospheric profiles',"\n")
@@ -216,6 +216,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	#2.download SSM LST
 	########################################################################
 	if(options$monthly==FALSE){
+		SSM_url<-SSM_url[!is.na(SSM_url)]
 		destfiles_ssm<-basename(SSM_url)
 		cat(' ',"\n")
 		cat('downloading SSM/I, SSMIS LST',"\n")
