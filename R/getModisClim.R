@@ -236,7 +236,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 				respon <-httr::GET(as.character(SSM_url[i]), write_disk(destfiles_ssm[i], overwrite = TRUE), 
 					authenticate(usr, pass))
 				# Check to see if file downloaded correctly
-				if (response$status_code == 200) {
+				if (respon$status_code == 200) {
 					cat(' ',"\n")
 					cat(destfiles_ssm[i],"downloaded","\n")
 				} else {
