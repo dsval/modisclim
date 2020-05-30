@@ -385,7 +385,7 @@ readMOD07<-function(filename){
 	fr<-function(x,y) {
 		
 		frvect<-function(x,y){
-			if(sum(is.na(x))==length(x)){
+			if((sum(is.na(x))==length(x))||(sum(is.na(x))!=sum(is.na(y)))){
 				c(NA,NA)
 			}else{
 				coefs<-.lm.fit(cbind(1, na.omit(x)), na.omit(y))
