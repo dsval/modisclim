@@ -21,7 +21,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 		on.exit(stopCluster(options$cl))
 	}
 	
-	rasterOptions(todisk=F)
+	rasterOptions(todisk=T)
 	# end testing
 ########################################################################
 #1.get the urls
@@ -31,7 +31,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	options$use.clouds=TRUE
 	cat('Retrieving the urls',"\n")
  url<- "http://modwebsrv.modaps.eosdis.nasa.gov/axis2/services/MODAPSservices/"
- if (options$use.clouds==TRUE){
+ askids<-function(start, end,DNB){
 	query_par <- list(products = gsub(" ", "", toString(c('MOD07_L2','MYD07_L2','MOD06_L2','MYD06_L2'))),
 		collection = '61',
 		startTime = start,
@@ -42,19 +42,6 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 		west = lon-0.1,
 		coordsOrTiles = 'coords',
 		dayNightBoth = DNB)
- }else{
-	query_par <- list(products = gsub(" ", "", toString(c('MOD07_L2','MYD07_L2'))),
-		collection = 61,
-		startTime = start,
-		endTime = end,
-		north = lat+0.1,
-		south = lat-0.11,
-		east = lon+0.1,
-		west = lon-0.1,
-		coordsOrTiles = 'coords',
-		dayNightBoth = DNB)
- }
-
 	query_out<-httr::GET(url = paste0(url, "searchForFiles"),query = query_par)
 	## NASA API apparently doesn't like too many requests, but it works after few trials
 	while (query_out$status_code != 200){
@@ -66,6 +53,21 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	fileIds<- xml2::read_html(fileIds)
 	fileIds <- do.call(rbind, xml2::as_list(fileIds)[[1]][[1]][[1]])
 	if(fileIds[1,] == 'No results') stop("No records whitin the time range")
+	
+	return(fileIds)
+ }
+########################################################################
+#1.1 create monthly intervals, the server doesn't like too many requests
+######################################################################## 
+ 
+beg<-format(as.Date(start),'%Y')
+til<-format(as.Date(end),'%Y')
+datestarts<-format(seq(as.Date(paste0(beg,'-01-01')),as.Date(paste0(til,'-12-01')),by='month'),format='%Y-%m-%d')
+dateends<-format(seq(as.Date(paste0(beg,'-02-1')),as.Date(paste0(as.numeric(til)+1,'-01-01')),by='month')-1,format='%Y-%m-%d')
+#### request the fileids###
+fileIds<-mapply(askids,datestarts,dateends,MoreArgs = list(DNB=DNB))
+ 
+
 	# get the urls
 	get_urls<-function(fileid){
 		files_md<-httr::GET(url = paste0(url,"getFileUrls"),query = list(fileIds=fileid))
@@ -75,8 +77,9 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 		fileurl <- do.call(rbind, xml2::as_list(fileurl)[[1]][[1]][[1]])
 		fileurl
 	}
-	
-	file_urls<-mapply(FUN=get_urls,fileIds)
+	##request urls by chunks, otherwise the server will hang up on too many requests
+	file_urls<-lapply(fileIds,FUN=function(x){mapply(FUN=get_urls,x)})
+	file_urls<-do.call(c,file_urls)
 	file_urls<-do.call(c,file_urls)
 	zdates<-do.call(rbind,strsplit(file_urls,'.',fixed=T))
 	# length(zdates[1,])-4
@@ -84,18 +87,22 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	file_urls<-cbind(file_urls,as.character(zdates))
 	file_urls<- file_urls[order(file_urls[,2]),]
 	########################################################################
-	#1.get monthly MODIS LST urls
+	#2.get monthly MODIS LST urls
 	########################################################################
-	qextent<-query_par
-	qextent[[1]]<-'MOD11B3'
-	qextent[[2]]<-6
-	qextent[[10]]<-'D'
-	format(as.Date(start),'%m')
-	format(as.Date(start),'%Y')
+	qextent<-list(products = 'MOD11B3',
+		collection = '6',
+		startTime = start,
+		endTime = end,
+		north = lat+0.1,
+		south = lat-0.1,
+		east = lon+0.1,
+		west = lon-0.1,
+		coordsOrTiles = 'coords',
+		dayNightBoth = 'D')
 	qextent[[3]]<-paste0(format(as.Date(start),'%Y'),'-',format(as.Date(start),'%m'),'-01')
 	qextent[[4]]<-paste0(format(as.Date(end),'%Y'),'-',format(as.Date(end),'%m'),'-01')
 	query_oute<-httr::GET(url = paste0(url, "searchForFiles"),query = qextent)
-	while(query_out$status_code != 200){
+	while(query_oute$status_code != 200){
 		query_oute<-httr::GET(url = paste0(url, "searchForFiles"),query = qextent)
 	}
 	fileIdse <- httr::content(query_oute, as = "text")
@@ -379,9 +386,11 @@ readMOD07<-function(filename){
 	# subsetting readings max aronud ~8KM (lower than tropopause)
 	vw<-subset(vw,13:20)
 	#error reading QA fixing, negative humidity
-	vw[vw<0]<-0
+	# vw[vw<0]<-0
+	vw<-reclassify(vw, cbind(-Inf,0, 0), right=TRUE)
 	extent(vw)<-extent(bbox)
 	projection(vw)<-wgs
+	#calc adiabatic lapse rates
 	fr<-function(x,y) {
 		
 		frvect<-function(x,y){
@@ -414,7 +423,7 @@ readMOD07<-function(filename){
 readMOD06<-function(filename){
 	# returns a list with 3 datasets: cth= cloud top heigth (m),cl_bs=cloud base height(m) ,tcloud=cloud top temperature (C)
 	# testting
-	# filename=filenames_cld[4]
+	# filename='C:/Modis_Atm/MOD06_L2.A2000064.2255.061.2017272140922.hdf'
 	# end testing
 	#read datatsets
 	sds <- get_subdatasets(filename)
@@ -436,11 +445,11 @@ readMOD06<-function(filename){
 	#get rid of readings above the tropopause
 	cth<- reclassify(cth, cbind(8000, +Inf, NA), right=TRUE)
 	# read cloud optical thickness
-	copt<- raster(readGDAL(sds[73], as.is = TRUE,silent = T))*0.009999999776482582
+	copt<- calc(raster(readGDAL(sds[73], as.is = TRUE,silent = T)),fun = function(x){x*0.009999999776482582})
 	extent(copt)<-extent(bbox)
 	projection(copt) <- wgs
 	# read cloud effective radius
-	cefr<- raster(readGDAL(sds[67], as.is = TRUE,silent = T))*0.009999999776482582
+	cefr<- calc(raster(readGDAL(sds[67], as.is = TRUE,silent = T)),fun = function(x){x*0.009999999776482582})
 	extent(cefr)<-extent(bbox)
 	projection(cefr) <- wgs
 	# calculate cloud base height(masl)  Welch, et al. 2008 doi 10.1175/2007JAMC1668.1
@@ -450,28 +459,33 @@ readMOD06<-function(filename){
 	}
 	cl_bs<-overlay(copt,cefr,cth,fun=calc_bh)
 	# read cloud top temperature
-	tcloud<-brick(readGDAL(sds[104], as.is = TRUE,silent = T))
-	tcloud<-((tcloud+15000)* 0.009999999776482582)-273.15
+	tcloud<-calc(raster(readGDAL(sds[104], as.is = TRUE,silent = T)),fun=function(x){((x+15000)* 0.009999999776482582)-273.15})
 	extent(tcloud)<-extent(bbox)
 	projection(tcloud) <- wgs
-	tcloud<-projectRaster(tcloud,cth)
+	#tcloud<-projectRaster(tcloud,cth)
+	# QF<-readGDAL(sds[124], as.is = TRUE,silent = T)
 	# rgadl error reading QA flags, remove bad vlues
 	tcloud<-reclassify(tcloud, cbind(-Inf,-30, NA), right=TRUE)
 	#get rid of readings above the tropopause
 	tcloud<-mask(tcloud,cth)
-	# cloud thickness
-	z_cld<-cth-cl_bs
 	######air temperature at the base of the cloud######
-	# temperature in kelvin
-	TclK<-tcloud+273.15
-	# get cloud water vap pressure [pa]
-	es<-0.6108*1000*exp((17.27*tcloud)/(tcloud+237.3))
-	#calc mixing ratio at the top of the cloud http://glossary.ametsoc.org/wiki/Mixing_ratio
-	mr<-(0.622*es)/(elev2pres(cth)-es)
-	# get saturated adiabatic lapse rate K/m http://glossary.ametsoc.org/wiki/Saturation-adiabatic_lapse_rate
-	L<-9.8*((287*(TclK)^2+ 2501000*mr*(TclK))/(1003.5*287*(TclK)^2+2501000^2*mr*0.622))
-	#calc air temperature at the base of the cloud
-	Ta_bh<-tcloud+(L*z_cld)
+	calc_Tbh<-function(cth,cl_bs,tcloud){
+		# cloud thickness
+		z_cld<-cth-cl_bs
+		#temperature in kelvin
+		TclK<-tcloud+273.15
+		# get cloud water vap pressure [pa]
+		es<-0.6108*1000*exp((17.27*tcloud)/(tcloud+237.3))
+		#calc mixing ratio at the top of the cloud http://glossary.ametsoc.org/wiki/Mixing_ratio
+		mr<-(0.622*es)/(elev2pres(cth)-es)
+		# get saturated adiabatic lapse rate K/m http://glossary.ametsoc.org/wiki/Saturation-adiabatic_lapse_rate
+		L<-9.8*((287*(TclK)^2+ 2501000*mr*(TclK))/(1003.5*287*(TclK)^2+2501000^2*mr*0.622))
+		#calc air temperature at the base of the cloud
+		Ta_bh<-tcloud+(L*z_cld)
+		return(Ta_bh)
+	}
+	
+	Ta_bh<-overlay(cth,cl_bs,tcloud,fun=calc_Tbh)
 	gc()
 	return(list(cth=cth,cl_bs=cl_bs,tcloud=tcloud,Ta_bh=Ta_bh))
 	
