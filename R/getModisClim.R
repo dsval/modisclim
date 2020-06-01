@@ -52,7 +52,10 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 	# fileIds <- xml2::read_xml(fileIds)
 	fileIds<- xml2::read_html(fileIds)
 	fileIds <- do.call(rbind, xml2::as_list(fileIds)[[1]][[1]][[1]])
-	if(fileIds[1,] == 'No results') stop("No records whitin the time range")
+	if(fileIds[1,] == 'No results') {
+		warning(paste('No records between',start,'and',end,'!!'))
+		fileIds[1,]<-NA
+	}
 	
 	return(fileIds)
  }
@@ -67,20 +70,27 @@ dateends<-format(seq(as.Date(paste0(beg,'-02-1')),as.Date(paste0(as.numeric(til)
 #### request the fileids###
 fileIds<-mapply(askids,datestarts,dateends,MoreArgs = list(DNB=DNB))
  
+filetest<-askids(datestarts[1],dateends[1],'DB') 
 
 	# get the urls
 	get_urls<-function(fileid){
-		files_md<-httr::GET(url = paste0(url,"getFileUrls"),query = list(fileIds=fileid))
-		fileurl <- httr::content(files_md, as = "text")
-		# fileurl <- xml2::read_xml(fileurl)
-		fileurl <- xml2::read_html(fileurl)
-		fileurl <- do.call(rbind, xml2::as_list(fileurl)[[1]][[1]][[1]])
+		if(is.na(fileid)){
+			fileurl<-NA	
+		}else{
+			files_md<-httr::GET(url = paste0(url,"getFileUrls"),query = list(fileIds=fileid))
+			fileurl <- httr::content(files_md, as = "text")
+			# fileurl <- xml2::read_xml(fileurl)
+			fileurl <- xml2::read_html(fileurl)
+			fileurl <- do.call(rbind, xml2::as_list(fileurl)[[1]][[1]][[1]])	
+		}
+		
 		fileurl
 	}
 	##request urls by chunks, otherwise the server will hang up on too many requests
 	file_urls<-lapply(fileIds,FUN=function(x){mapply(FUN=get_urls,x)})
 	file_urls<-do.call(c,file_urls)
 	file_urls<-do.call(c,file_urls)
+	file_urls<-file_urls[!is.na(file_urls)]
 	zdates<-do.call(rbind,strsplit(file_urls,'.',fixed=T))
 	# length(zdates[1,])-4
 	zdates<-strptime(paste0(zdates[,length(zdates[1,])-4],zdates[,length(zdates[1,])-3]),format='A%Y%j%H%M')
