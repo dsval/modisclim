@@ -27,6 +27,7 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 #1.get the urls
 ########################################################################
 	dem_hr<-dem
+	start.time<-Sys.time()
 	#build the query
 	options$use.clouds=TRUE
 	cat('Retrieving the urls',"\n")
@@ -62,15 +63,23 @@ getModisClim<-function(lat,lon,start,end,DNB='DB',options=list(cl=NULL,tile=TRUE
 ########################################################################
 #1.1 create monthly intervals, the server doesn't like too many requests
 ######################################################################## 
- 
-beg<-format(as.Date(start),'%Y')
-til<-format(as.Date(end),'%Y')
-datestarts<-format(seq(as.Date(paste0(beg,'-01-01')),as.Date(paste0(til,'-12-01')),by='month'),format='%Y-%m-%d')
-dateends<-format(seq(as.Date(paste0(beg,'-02-1')),as.Date(paste0(as.numeric(til)+1,'-01-01')),by='month')-1,format='%Y-%m-%d')
+range<-seq(as.Date(start),as.Date(end),by='month')
+if(length(range)>12){
+	beg<-format(as.Date(start),'%Y')
+	til<-format(as.Date(end),'%Y')
+	datestarts<-format(seq(as.Date(paste0(beg,'-01-01')),as.Date(paste0(til,'-12-01')),by='month'),format='%Y-%m-%d')
+	dateends<-format(seq(as.Date(paste0(beg,'-02-1')),as.Date(paste0(as.numeric(til)+1,'-01-01')),by='month')-1,format='%Y-%m-%d')
+}else{
+	
+	datestarts<-format(seq(as.Date(start),as.Date(end),by='day'),format='%Y-%m-%d')
+	dateends<-datestarts
+	
+}
+
 #### request the fileids###
 fileIds<-mapply(askids,datestarts,dateends,MoreArgs = list(DNB=DNB))
  
-filetest<-askids(datestarts[1],dateends[1],'DB') 
+
 
 	# get the urls
 	get_urls<-function(fileid){
@@ -264,9 +273,10 @@ filetest<-askids(datestarts[1],dateends[1],'DB')
 		}
 		filenames_SSM<-paste0(tmpdir,'/',destfiles_ssm)	
 	}
-	
-	
 
+end.time<-Sys.time()
+cat("time taken downloading:",end.time-start.time	,"\n")
+start.time<-Sys.time()
 ########################################################################
 #3.read the data, ....mapply is working faster than overay wth a rasterstack
 ########################################################################	
@@ -331,6 +341,8 @@ elev2pres <- function(z) {
 }
 p_dryair<-function(elev,t){
 	#calc dry air density [kg/m3] using pv=nRT
+	kMa <- 0.028963     # molecular weight of dry air, kg/mol (Tsilingiris, 2008)
+	kR <- 8.31447       # universal gas constant, J/mol/K (Moldover et al., 1988)
 	(elev2pres(elev)*kMa)/(kR*(t+273.15))
 }
 
@@ -339,8 +351,8 @@ readlst<-function(filename){
 	# filename=filenamlst[1]
 	lst<-raster(get_subdatasets(filename)[1])
 	lst<-projectRaster(lst,crs="+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
-	lst-273.15
-}
+	calc(lst,fun=function(x)x-273.15,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
+	}
 ######################################BitFlagDecoder###############################
 BitFlagDecoder <- function(x,bits=16,obj=15){
 	i <- 1
@@ -417,7 +429,7 @@ readMOD07<-function(filename){
 		coefs<-t(mapply(frvect,split(x, row(x)) ,split(y, row(y)),SIMPLIFY = T))
 		return(coefs)
 	}
-	calc_lr<-function(x,y){overlay(x,y,fun=fr)}
+	calc_lr<-function(x,y){overlay(x,y,fun=fr,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))}
 	
 	LR_csky<-calc_lr(tropohgt,ta_press)
 	VR_csky<-calc_lr(tropohgt,vw)
@@ -453,7 +465,7 @@ readMOD06<-function(filename){
 	extent(cth)<-extent(bbox)
 	projection(cth) <- wgs
 	#get rid of readings above the tropopause
-	cth<- reclassify(cth, cbind(8000, +Inf, NA), right=TRUE)
+	cth<- reclassify(cth, cbind(8000, +Inf, NA), right=TRUE,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	# read cloud optical thickness
 	copt<- calc(raster(readGDAL(sds[73], as.is = TRUE,silent = T)),fun = function(x){x*0.009999999776482582})
 	extent(copt)<-extent(bbox)
@@ -467,7 +479,7 @@ readMOD06<-function(filename){
 		cldbh<-clth-((4/3)*cot*cer*(0.002)^-1)^0.5
 		ifelse(cldbh<0,0.0,cldbh)
 	}
-	cl_bs<-overlay(copt,cefr,cth,fun=calc_bh)
+	cl_bs<-overlay(copt,cefr,cth,fun=calc_bh,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	# read cloud top temperature
 	tcloud<-calc(raster(readGDAL(sds[104], as.is = TRUE,silent = T)),fun=function(x){((x+15000)* 0.009999999776482582)-273.15})
 	extent(tcloud)<-extent(bbox)
@@ -477,7 +489,7 @@ readMOD06<-function(filename){
 	# rgadl error reading QA flags, remove bad vlues
 	tcloud<-reclassify(tcloud, cbind(-Inf,-30, NA), right=TRUE)
 	#get rid of readings above the tropopause
-	tcloud<-mask(tcloud,cth)
+	tcloud<-mask(tcloud,cth,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	######air temperature at the base of the cloud######
 	calc_Tbh<-function(cth,cl_bs,tcloud){
 		# cloud thickness
@@ -495,7 +507,7 @@ readMOD06<-function(filename){
 		return(Ta_bh)
 	}
 	
-	Ta_bh<-overlay(cth,cl_bs,tcloud,fun=calc_Tbh)
+	Ta_bh<-overlay(cth,cl_bs,tcloud,fun=calc_Tbh,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	gc()
 	return(list(cth=cth,cl_bs=cl_bs,tcloud=tcloud,Ta_bh=Ta_bh))
 	
@@ -513,40 +525,56 @@ read_ssm<-function(filename){
 	r<-raster(raw, xmn=-17324563.84, xmx=17324563.84, ymn=-7338939.46, ymx=7338939.46,crs='+init=epsg:3410')
 	r<-projectRaster(r,crs="+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 	# get brightness temperature 37gz V polarization Holmes, et al. 2008 doi 10.1029/2008JD010257
-	calc(r,function(x){y=(x/10);(1.11*y-15.2)-273.15})
+	calc(r,function(x){y=(x/10);(1.11*y-15.2)-273.15},filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 }
 ############################# reading the data ############################
 ##reading temperature and humidity profiles
 cat(' ',"\n")
 if(is.null(options$cl)){
-	cat('reading temperature and humidity profiles',"\n")
+	cat('reading temperature and humidity profiles, computing ELRs',"\n")
 	atm<-mapply(FUN=readMOD07,filenames_atm,SIMPLIFY = F)
-	cat('reading cloud info',"\n")
+	cat('reading cloud info, computing cloud base heigths and base temperature',"\n")
 	clds<-mapply(FUN=readMOD06,filenames_cld,SIMPLIFY = F)
+	cat(' ',"\n")
+	cat('reading modis LST',"\n")
+	lst_mod<-mapply(FUN=readlst,filenamlst,SIMPLIFY = F)
 }else{
 	doSNOW::registerDoSNOW(options$cl)
-	snow::clusterEvalQ(options$cl, lapply(c('raster','rgdal','gdalUtils'), library, character.only = TRUE))
-	snow::clusterExport(options$cl, list=c("readMOD07","readMOD06",'filenames_atm','filenames_cld','elev2pres'),envir=environment())
-	cat('reading temperature and humidity profiles',"\n")
+	cat('starting cluster for parallel computation',"\n")
+	snow::clusterEvalQ(options$cl, lapply(c('raster','rgdal','gdalUtils','MASS'), library, character.only = TRUE))
+	snow::clusterExport(options$cl, list=c("readMOD07","readMOD06",'filenames_atm','filenames_cld','elev2pres','readlst','filenamlst','rasterOptions','tmpdir'),envir=environment())
+	cat('reading temperature and humidity profiles, computing ELRs',"\n")
 	atm<-snow::clusterMap(cl = options$cl, fun=readMOD07, filename=filenames_atm)
-	cat('reading cloud info',"\n")
+	cat('reading cloud info, computing cloud base height and base temperature',"\n")
 	clds<-snow::clusterMap(cl = options$cl, fun=readMOD06, filename=filenames_cld)
+	cat(' ',"\n")
+	cat('reading modis LST',"\n")
+	if(length(urlext)>1){
+		lst_mod<-snow::clusterMap(cl = options$cl, fun=readlst, filename=filenamlst)
+	}else{
+		lst_mod<-mapply(FUN=readlst,filenamlst,SIMPLIFY = F)
+	}
+	
 	
 }
 
-gc()
 
-##read modis lst
-cat(' ',"\n")
-cat('reading modis LST',"\n")
-lst_mod<-mapply(FUN=readlst,filenamlst,SIMPLIFY = F)
+
 ##read ssm lst
 if(options$monthly==FALSE){
 	cat(' ',"\n")
 	cat('reading SSM LST',"\n")
 	##read ssm lst
-	lst_ssm<-mapply(FUN=read_ssm,filenames_SSM,SIMPLIFY = F)
-	lst_ssm<-mapply(crop,x=lst_ssm,MoreArgs = list(y=lst_mod[[1]]),SIMPLIFY = F)
+	if(is.null(options$cl)){
+		lst_ssm<-mapply(FUN=read_ssm,filenames_SSM,SIMPLIFY = F)
+		lst_ssm<-mapply(crop,x=lst_ssm,MoreArgs = list(y=lst_mod[[1]]),SIMPLIFY = F)
+	}else{
+		snow::clusterExport(options$cl, list=c("read_ssm","filenames_SSM",'lst_mod'),envir=environment())
+		lst_ssm<-snow::clusterMap(cl = options$cl, fun=read_ssm, filename=filenames_SSM)
+		lst_ssm<-snow::clusterMap(cl = options$cl, fun=crop, x=lst_ssm,MoreArgs = list(y=lst_mod[[1]]))
+			
+	}
+
 	lst_ssm<-approxNA(stack(lst_ssm),rule=2)
 	########################################################################
 	#1. downscale lst
@@ -557,16 +585,24 @@ if(options$monthly==FALSE){
 	# get array to do mapply
 	lsmpd<-unlist(mapply(replicate,nds$Freq,lst_mod,SIMPLIFY = F))
 	# get funct to downs
+	gc()
 	cat('downscaling LST',"\n")
 	dowsn<-function(x,y){downscaleRLM(x,y)$downscale}
-	# gapfill
-	lst_ssm<-mapply(dowsn,as.list(lst_ssm),lsmpd,SIMPLIFY = F)
+	if(is.null(options$cl)){
+		lst_ssm<-mapply(dowsn,as.list(lst_ssm),lsmpd,SIMPLIFY = F)
+	}else{
+		snow::clusterExport(options$cl, list=c('downscaleRLM',"dowsn","lst_ssm",'lsmpd'),envir=environment())
+		lst_ssm<-snow::clusterMap(cl = options$cl, fun=dowsn,x=as.list(lst_ssm),y=lsmpd)
+	}
+	
 }
-
 gc()
+end.time<-Sys.time()
+cat("time taken reading the datasets:",end.time-start.time	,"\n")
 ########################################################################
 #3.Organize the layers
 ########################################################################
+start.time<-Sys.time()
 # stack the grids
 
 LR_csky<-list()
@@ -590,24 +626,42 @@ rm(atm)
 rm(clds)
 gc()
 # fix formats and extent
-tiddyup<-function(rastrlist,mold){
-	result<-mapply(FUN=extend,rastrlist,MoreArgs=list(y=mold),SIMPLIFY = F)
-	result<-mapply(FUN=crop,result,MoreArgs=list(y=mold),SIMPLIFY = F)
-	result<-mapply(FUN=projectRaster,result,MoreArgs=list(to=mold),SIMPLIFY = F)
-	#result<-mapply(FUN=mask,result,MoreArgs=list(mask=mold),SIMPLIFY = F)
-	# stack(result)
-	result
-}
-LR_csky<-tiddyup(LR_csky,lst_mod[[1]])
-VR_csky<-tiddyup(VR_csky,lst_mod[[1]])
-cl_top_hgt<-tiddyup(cl_top_hgt,lst_mod[[1]])
-cl_b_hgt<-tiddyup(cl_b_hgt,lst_mod[[1]])
-cl_t<-tiddyup(cl_t,lst_mod[[1]])
-cl_b_T<-tiddyup(cl_b_T,lst_mod[[1]])
 
-
-
-
+if(is.null(options$cl)){
+	tiddyup<-function(rastrlist,mold){
+		result<-mapply(FUN=extend,rastrlist,MoreArgs=list(y=mold),SIMPLIFY = F)
+		result<-mapply(FUN=crop,result,MoreArgs=list(y=mold),SIMPLIFY = F)
+		result<-mapply(FUN=projectRaster,result,MoreArgs=list(to=mold),SIMPLIFY = F)
+		#result<-mapply(FUN=mask,result,MoreArgs=list(mask=mold),SIMPLIFY = F)
+		# stack(result)
+		result
+	}
+	LR_csky<-tiddyup(LR_csky,lst_mod[[1]])
+	VR_csky<-tiddyup(VR_csky,lst_mod[[1]])
+	cl_top_hgt<-tiddyup(cl_top_hgt,lst_mod[[1]])
+	cl_b_hgt<-tiddyup(cl_b_hgt,lst_mod[[1]])
+	cl_t<-tiddyup(cl_t,lst_mod[[1]])
+	cl_b_T<-tiddyup(cl_b_T,lst_mod[[1]])
+}else{
+	tiddyup_par<-function(rastrlist,mold){
+		files<-lapply(rastrlist,filename)
+		snow::clusterExport(options$cl, list=c('rastrlist',"mold",'files'),envir=environment())
+		result<-snow::clusterMap(cl = options$cl, fun=extend,rastrlist,filename=files,MoreArgs=list(y=mold,overwrite=TRUE))
+		snow::clusterExport(options$cl, list=c('result'),envir=environment())
+		result<-snow::clusterMap(cl = options$cl, fun=crop,result,filename=files,MoreArgs=list(y=mold,overwrite=TRUE))
+		snow::clusterExport(options$cl, list=c('result'),envir=environment())
+		result<-snow::clusterMap(cl = options$cl, fun=projectRaster,result,filename=files,MoreArgs=list(to=mold,overwrite=TRUE))
+		result
+	}
+	LR_csky<-tiddyup_par(LR_csky,lst_mod[[1]])
+	VR_csky<-tiddyup_par(VR_csky,lst_mod[[1]])
+	cl_top_hgt<-tiddyup_par(cl_top_hgt,lst_mod[[1]])
+	cl_b_hgt<-tiddyup_par(cl_b_hgt,lst_mod[[1]])
+	cl_t<-tiddyup_par(cl_t,lst_mod[[1]])
+	cl_b_T<-tiddyup_par(cl_b_T,lst_mod[[1]])
+	}
+	end.time<-Sys.time()
+	cat("time taken organizing the layers:",end.time-start.time	,"\n")
 ########################################################################
 #3.gap fill daily adiabatic Lapse rate asuming meain in 3 neigthbour pixels
 ########################################################################
@@ -621,16 +675,13 @@ gapfill<-function(x){
 		}
 	}
 	fillLR<-focal(x,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE)
-	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE) 
+	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE,filename=filename(x),overwrite=T) 
 	# for (i in 1:2){
 	# 	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE)
 	# }
 	return(fillLR)
 }
 
-#gaptest<-gapfill(int_VR_day[[1]])
-
-gc()
 dem<-projectRaster(dem,lst_mod[[1]])
 dem_hr<-crop(dem_hr,dem)
 
@@ -639,8 +690,20 @@ gc()
 ########################################################################
 #3.calculate  temp lapse rate under the clouds and map orographic inmmersion following Nair et al., 2008 doi: 10.1175/2007JAMC1819.1
 ########################################################################
+cat("calculating ELRs under the clouds","\n")
+start.time<-Sys.time()
 setwd(tmpdir)
 calc_ub_cld<-function(cl_b_t,cld_b_ht,dem){
+	############################# some constants ############################
+	kG <- 9.80665       # gravitational acceleration, m/s^2 (Allen, 1973)
+	kL <- 0.0065        # adiabatic lapse rate, K/m (Cavcar, 2000)
+	kMa <- 0.028963     # molecular weight of dry air, kg/mol (Tsilingiris, 2008)
+	kPo <- 101325       # standard atmosphere, Pa (Allen, 1973)
+	kR <- 8.31447       # universal gas constant, J/mol/K (Moldover et al., 1988)
+	kTo <- 288.15       # base temperature, K (Berberan-Santos et al., 1997)
+	kcp <- 1010		# specific heat dry air at constant pressure J/Kg/K (Oke, 1996)
+	kcpw<- 1880		# specific heat water vapour at constant pressure J/Kg/K (Oke, 1996)
+	
 	# h=cloud altitude (m)
 	h<-cl_b_t-dem
 	h<-ifelse(h<0,0,h)
@@ -690,37 +753,47 @@ calc_ub_cld<-function(cl_b_t,cld_b_ht,dem){
 	
 	#get vapour density [kg/m3](Oke, 1996)
 }
-calc_ub_cld_rast<-function(cl_b_t,cld_b_ht,dem){overlay(cl_b_t,cld_b_ht,dem,fun=calc_ub_cld)}
-
-LR_uclds<-mapply(FUN=calc_ub_cld_rast,cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))
+calc_ub_cld_rast<-function(cl_b_t,cld_b_ht,dem){overlay(cl_b_t,cld_b_ht,dem,fun=calc_ub_cld,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))}
 
 
-#calc_ub_cld_rast not working in parallel, weird error vectorized formula??
-# if(is.null(cl)){
-# 	LR_uclds<-mapply(FUN=calc_ub_cld_rast,cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))
-# }else{
-# 	snow::clusterExport(options$cl, list=c("calc_ub_cld_rast","calc_ub_cld",'cl_b_T','cl_b_hgt','dem'),envir=environment())
-# 	LR_uclds<-snow::clusterMap(cl = options$cl, fun=calc_ub_cld_rast, cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))	
-# }
-
-
+if(is.null(options$cl)){
+	LR_uclds<-mapply(FUN=calc_ub_cld_rast,cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))
+}else{
+	snow::clusterExport(options$cl, list=c("calc_ub_cld_rast","calc_ub_cld",'cl_b_T','cl_b_hgt','dem'),envir=environment())
+	LR_uclds<-snow::clusterMap(cl = options$cl, fun=calc_ub_cld_rast, cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))	
+}
+end.time<-Sys.time()
+cat("time taken organizing the layers:",end.time-start.time	,"\n")
+start.time<-Sys.time()
+########################################################################
+#3.calculate average LR between cSky and cloudy sky
+########################################################################
 
 #function to calc average between raster objects, ignoring Nas
-calc_avgTa<-function(x,y){overlay(x,y,fun=function(x,y){rowMeans(cbind(x,y),na.rm = T)})}
+calc_avgTa<-function(x,y){overlay(x,y,fun=function(x,y){rowMeans(cbind(x,y),na.rm = T)},filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))}
 #function to loop averages between clear sky and cloudy data
 
 calc_lr_avg<-function(cs,uc){stack(calc_avgTa(cs[[1]],uc[[1]]),calc_avgTa(cs[[2]],uc[[2]]))}
 
 #merged LR cloudy and clear data
-LR_avg<-mapply(calc_lr_avg,LR_csky,LR_uclds)
+if(is.null(options$cl)){
+	LR_avg<-mapply(calc_lr_avg,LR_csky,LR_uclds)
+}else{
+	snow::clusterExport(options$cl, list=c("calc_lr_avg","calc_avgTa",'LR_csky','LR_uclds'),envir=environment())
+	LR_avg<-snow::clusterMap(cl = options$cl, fun=calc_lr_avg,LR_csky,LR_uclds)	
+}
+
 
 #intercept daily Ta 
 int_day<-list()
 LR_day<-list()
 for(i in 1:length(LR_avg)){int_day[[i]]<-LR_avg[[i]][[1]]};
 for(i in 1:length(LR_avg)){LR_day[[i]]<-LR_avg[[i]][[2]]};
-rm(LR_avg)
+#rm(LR_avg)
 gc()
+########################################################################
+#3.gap fill daily adiabatic Lapse rate asuming meain in 3 neigthbour pixels
+########################################################################
 #Gapfilling temperature parameters
 if(is.null(options$cl)){
 	int_day<-mapply(gapfill,int_day)
@@ -739,9 +812,7 @@ LR_day<-setZ(stack(LR_day),zdates_atm)
 LR_day<-zApply(LR_day,as.Date(zdates_atm),mean)
 
 
-########################################################################
-#3.gap fill daily adiabatic Lapse rate asuming meain in 3 neigthbour pixels
-########################################################################
+
 
 gapfillgauss<-function(x){
 	fill.na <- function(x, i=5) {
@@ -755,7 +826,7 @@ gapfillgauss<-function(x){
 	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE)
 	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE)
 	gf <- focalWeight(fillLR, 0.15, "Gauss")
-	fillLR <- focal(fillLR, w=gf,na.rm=F) 
+	fillLR <- focal(fillLR, w=gf,na.rm=T,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd')) 
 	# for (i in 1:2){
 	# 	fillLR<-focal(fillLR,w = matrix(1,3,3), fun = fill.na, pad = TRUE, na.rm = FALSE)
 	# }
@@ -782,18 +853,31 @@ LR_day<-setZ(LR_day,unique(as.Date(zdates_atm)))
 ########################################################################
 #3.process humidity
 ########################################################################
-#intercept vw regression
 
-calc_lr_avg<-function(cs,uc){stack(calc_avgTa(cs[[1]],uc[[3]]),calc_avgTa(cs[[2]],uc[[4]]))}
+
+calc_vr_avg<-function(cs,uc){stack(calc_avgTa(cs[[1]],uc[[3]]),calc_avgTa(cs[[2]],uc[[4]]))}
 
 #merged LR cloudy and clear data
-VR_avg<-mapply(calc_lr_avg,VR_csky,LR_uclds)
+
+
+
+#merged LR cloudy and clear data
+if(is.null(options$cl)){
+	VR_avg<-mapply(calc_vr_avg,VR_csky,LR_uclds)
+}else{
+	snow::clusterExport(options$cl, list=c("calc_vr_avg",'VR_csky','LR_uclds'),envir=environment())
+	VR_avg<-snow::clusterMap(cl = options$cl, fun=calc_vr_avg,VR_csky,LR_uclds)
+	
+}
+
+
+
 #calc daily averages
 int_VR_day<-list()
 VR_day<-list()
 for(i in 1:length(VR_avg)){int_VR_day[[i]]<-VR_avg[[i]][[1]]};
 for(i in 1:length(VR_avg)){VR_day[[i]]<-VR_avg[[i]][[2]]};
-rm(VR_avg)
+#rm(VR_avg)
 gc()
 #Gapfilling humidity parameters
 if(is.null(options$cl)){
@@ -827,31 +911,47 @@ VR_day<-stack(VR_day)
 
 int_VR_day<-setZ(int_VR_day,unique(as.Date(zdates_atm)))
 VR_day<-setZ(VR_day,unique(as.Date(zdates_atm)))
-
-
+end.time<-Sys.time()
+cat("time taken computing daily average ELR per pixel:",end.time-start.time	,"\n")
+start.time<-Sys.time()
 # stopCluster(cl)
-
+########################################################################
+#3.apply regressions
+########################################################################
 # function to apply the regression parameters
 
-calc_regr<-function(x,m,yo){
-	yo+m*x
+calcTa<-function(rate,intercpt,demhr){
+	calc_regr<-function(x,m,yo){
+		y=yo+m*x
+		#TO DO: fix these crazy values when snowing, 
+		y=ifelse(y<=-20,NA,y)
+		return(y)
+	}
+	overlay(demhr,
+		projectRaster(rate,demhr),
+		projectRaster(intercpt,demhr),
+		fun=calc_regr)
 }
 
-#project to dem resolution
-# stopCluster(options$cl)
-gc()
-int_VR_day<-projectRaster(int_VR_day,dem_hr)
-VR_day<-projectRaster(VR_day,dem_hr)
+test_ta<-calcTa(LR_day[[2]],int_day[[2]],dem_hr)
 
-int_day<-projectRaster(int_day,dem_hr)
-LR_day<-projectRaster(LR_day,dem_hr)
-## compute daily air temperature and humidity at surface
+system.time(test_ta<-mapply(calcTa,as.list(LR_day),as.list(int_day),MoreArgs = list(demhr=dem_hr)))
 
-Ta<-overlay(dem_hr,LR_day,int_day,fun=calc_regr)
 
-vr<-overlay(dem_hr,VR_day,int_VR_day,fun=calc_regr)
-
+if(is.null(options$cl)){
+	Ta<-mapply(calcTa,as.list(LR_day),as.list(int_day),MoreArgs = list(demhr=dem_hr))
+	vr<-mapply(calcTa,as.list(VR_day),as.list(int_VR_day),MoreArgs = list(demhr=dem_hr))
+	
+}else{
+	snow::clusterExport(options$cl, list=c("calcTa","LR_day",'VR_day','int_day','dem_hr'),envir=environment())
+	Ta<-snow::clusterMap(cl = options$cl, fun=calcTa,as.list(LR_day),as.list(int_day),MoreArgs = list(demhr=dem_hr))	
+	vr<-snow::clusterMap(cl = options$cl, fun=calcTa,as.list(VR_day),as.list(int_VR_day),MoreArgs = list(demhr=dem_hr))	
+	
+}
+########################################################################
 #compute ea [Pa] from mixing ratio
+########################################################################
+
 calc_ea<-function(a,t,dem){
 	#dry air density[kg/m3]
 	pair<-p_dryair(dem,t)
@@ -861,16 +961,29 @@ calc_ea<-function(a,t,dem){
 	es<-0.6108*1000*exp((17.27*t)/(t+237.3))
 	ea<-ifelse(ea>es,es,ea)
 	ea<-ifelse(ea<0,0,ea)
-	ea
+	return(ea)
 	
 }
-ea<-overlay(vr,Ta,dem_hr,fun=calc_ea)
+calc_ea_rast<-function(vr,Ta,dem_hr){overlay(vr,Ta,dem_hr,fun=calc_ea)}
+
+
+
+if(is.null(options$cl)){
+	ea<-mapply(calc_ea_rast,vr,Ta,MoreArgs = list(dem_hr=dem_hr))
+	
+}else{
+	snow::clusterExport(options$cl, list=c("calc_ea_rast","calc_ea",'vr','Ta','dem_hr','p_dryair'),envir=environment())
+	ea<-snow::clusterMap(cl = options$cl, fun=calc_ea_rast,vr,Ta,MoreArgs = list(dem_hr=dem_hr))	
+
+}
+end.time<-Sys.time()
+cat("time taken computing daily Ta and ea",end.time-start.time	,"\n")
+start.time<-Sys.time()
 
 if(options$monthly==TRUE){
 	# get es* [pa]
 	es<-calc(stack(lst_mod),fun=function(ts)0.6108*1000*exp((17.27*ts)/(ts+237.3)))
 	es<-approxNA(es,rule=2)
-	es<-projectRaster(es,Ta)
 	Ta<-setZ(Ta,unique(as.Date(zdates_atm)))
 	ea<-setZ(ea,unique(as.Date(zdates_atm)))
 	monthind<-format(getZ(Ta),'%Y-%m')
@@ -880,15 +993,16 @@ if(options$monthly==TRUE){
 	es<-setZ(es,dateseq_month)
 	ea<-setZ(ea,dateseq_month)
 	Ta<-setZ(Ta,dateseq_month)
-	
+	cat("writing results to outdir","\n")
 	Ta<-writeRaster(Ta,paste0(outdir,'/','Ta_month_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="Ta", varunit="C", longname="air temperature", xname="lon", yname="lat", zname="time")
 	ea<-writeRaster(ea,paste0(outdir,'/','ea_month_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="ea", varunit="Pa", longname="actual vapor pressure", xname="lon", yname="lat", zname="time")
-	es<-writeRaster(es,paste0(outdir,'/','es_month_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="es", varunit="Pa", longname="saturation vapor pressure(from LST)", xname="lon", yname="lat", zname="time")
+	es<-projectRaster(es,Ta,paste0(outdir,'/','es_month_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="es", varunit="Pa", longname="saturation vapor pressure(from LST)", xname="lon", yname="lat", zname="time")
 }else{
+	cat("writing results to outdir","\n")
 	es<-calc(stack(lst_ssm),fun=function(ts)0.6108*1000*exp((17.27*ts)/(ts+237.3)))
 	# es<-projectRaster(es,Ta)
-	Ta<-writeRaster(Ta,paste0(outdir,'/','Ta_day_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="Ta", varunit="C", longname="air temperature", xname="lon", yname="lat", zname="time", zunit=paste("days","since",paste0(as.numeric(format(as.Date(start),'%Y'))-1,"-",12,"-",31)))
-	ea<-writeRaster(ea,paste0(outdir,'/','ea_day_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="ea", varunit="Pa", longname="actual vapor pressure", xname="lon", yname="lat", zname="time", zunit=paste("days","since",paste0(as.numeric(format(as.Date(start),'%Y'))-1,"-",12,"-",31)))
+	Ta<-writeRaster(stack(Ta),paste0(outdir,'/','Ta_day_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="Ta", varunit="C", longname="air temperature", xname="lon", yname="lat", zname="time", zunit=paste("days","since",paste0(as.numeric(format(as.Date(start),'%Y'))-1,"-",12,"-",31)))
+	ea<-writeRaster(stack(ea),paste0(outdir,'/','ea_day_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="ea", varunit="Pa", longname="actual vapor pressure", xname="lon", yname="lat", zname="time", zunit=paste("days","since",paste0(as.numeric(format(as.Date(start),'%Y'))-1,"-",12,"-",31)))
 	es<-projectRaster(es,Ta,filename=paste0(outdir,'/','es_day_',hv[1],'.',beg,'.',til,'.nc'),format="CDF",overwrite=TRUE,varname="es", varunit="Pa", longname="saturation vapor pressure (from LST)", xname="lon", yname="lat", zname="time", zunit=paste("days","since",paste0(as.numeric(format(as.Date(start),'%Y'))-1,"-",12,"-",31)))
 }
 
