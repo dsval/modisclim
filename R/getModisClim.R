@@ -581,8 +581,8 @@ if(options$monthly==FALSE){
 	lst_ssm<-stack(lst_ssm,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	# interpolate missing values overpass satellite
 	if(length(ncells_ssmi)>3){
-		lst_ssm_gf<-approxNA(lst_ssm,rule=2)
-		for(i in length(bad_i)){lst_ssm[[bad_i[i]]]<-lst_ssm_gf[[bad_i[i]]]}
+		lst_ssm<-approxNA(lst_ssm,rule=2)
+		# for(i in length(bad_i)){lst_ssm[[bad_i[i]]]<-lst_ssm_gf[[bad_i[i]]]}
 		}
 	########################################################################
 	#1. downscale lst file21e822564812.grd
