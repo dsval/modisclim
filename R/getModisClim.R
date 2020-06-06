@@ -487,7 +487,7 @@ readMOD06<-function(filename){
 	#tcloud<-projectRaster(tcloud,cth)
 	# QF<-readGDAL(sds[124], as.is = TRUE,silent = T)
 	# rgadl error reading QA flags, remove bad vlues
-	tcloud<-reclassify(tcloud, cbind(-Inf,-30, NA), right=TRUE)
+	tcloud<-reclassify(tcloud, cbind(-Inf,-40, NA), right=TRUE)
 	#get rid of readings above the tropopause
 	tcloud<-mask(tcloud,cth,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 	######air temperature at the base of the cloud######
@@ -574,10 +574,18 @@ if(options$monthly==FALSE){
 		lst_ssm<-snow::clusterMap(cl = options$cl, fun=crop, x=lst_ssm,MoreArgs = list(y=lst_mod[[1]]))
 			
 	}
-
-	lst_ssm<-approxNA(stack(lst_ssm),rule=2)
+	ncells_ssmi<-mapply(ncell,lst_ssm)
+	nas_ssmi<-mapply(FUN=function(x){sum(is.na(getValues(x)))},lst_ssm)
+	bad_i<-ncells_ssmi==nas_ssmi | nas_ssmi>0.8*ncells_ssmi
+	bad_i<-(1:length(bad_i))[bad_i]	
+	lst_ssm<-stack(lst_ssm,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
+	# interpolate missing values overpass satellite
+	if(length(ncells_ssmi)>3){
+		lst_ssm_gf<-approxNA(lst_ssm,rule=2)
+		for(i in length(bad_i)){lst_ssm[[bad_i[i]]]<-lst_ssm_gf[[bad_i[i]]]}
+		}
 	########################################################################
-	#1. downscale lst
+	#1. downscale lst file21e822564812.grd
 	########################################################################
 	# get nday per month
 	nds<-format(as.Date(dateseq,format='%Y.%m.%d'),'%m')
@@ -763,7 +771,7 @@ if(is.null(options$cl)){
 	LR_uclds<-snow::clusterMap(cl = options$cl, fun=calc_ub_cld_rast, cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))	
 }
 end.time<-Sys.time()
-cat("time taken organizing the layers:",end.time-start.time	,"\n")
+cat("time taken computing ELR under the clouds:",end.time-start.time	,"\n")
 start.time<-Sys.time()
 ########################################################################
 #3.calculate average LR between cSky and cloudy sky
@@ -930,12 +938,9 @@ calcTa<-function(rate,intercpt,demhr){
 	overlay(demhr,
 		projectRaster(rate,demhr),
 		projectRaster(intercpt,demhr),
-		fun=calc_regr)
+		fun=calc_regr,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))
 }
 
-test_ta<-calcTa(LR_day[[2]],int_day[[2]],dem_hr)
-
-system.time(test_ta<-mapply(calcTa,as.list(LR_day),as.list(int_day),MoreArgs = list(demhr=dem_hr)))
 
 
 if(is.null(options$cl)){
@@ -948,6 +953,7 @@ if(is.null(options$cl)){
 	vr<-snow::clusterMap(cl = options$cl, fun=calcTa,as.list(VR_day),as.list(int_VR_day),MoreArgs = list(demhr=dem_hr))	
 	
 }
+gc()
 ########################################################################
 #compute ea [Pa] from mixing ratio
 ########################################################################
@@ -964,7 +970,7 @@ calc_ea<-function(a,t,dem){
 	return(ea)
 	
 }
-calc_ea_rast<-function(vr,Ta,dem_hr){overlay(vr,Ta,dem_hr,fun=calc_ea)}
+calc_ea_rast<-function(vr,Ta,dem_hr){overlay(vr,Ta,dem_hr,fun=calc_ea,filename=paste0(tempfile(pattern = "file", tmpdir = tmpdir),'.grd'))}
 
 
 
