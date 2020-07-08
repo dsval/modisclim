@@ -160,7 +160,7 @@ fileIds<-mapply(askids,datestarts,dateends,MoreArgs = list(DNB=DNB))
 	#2.download atmosphere
 	########################################################################
 	cat('downloading elevation from GMTED',"\n")
-	dem<-raster('https://data.earthenv.org/topography/elevation_5KMmd_GMTEDmd.tif')
+	dem<-raster('/vsicurl/https://data.earthenv.org/topography/elevation_5KMmd_GMTEDmd.tif')
 	cat('downloading atmospheric profiles',"\n")
 	for (i in 1:length(file_urls[,1])) {
 		if(!file.exists(destfiles[i])){
@@ -586,6 +586,7 @@ gapfill<-function(x){
 	return(fillLR)
 }
 
+crs(dem)<-crs(lst_mod[[1]])
 dem<-projectRaster(dem,lst_mod[[1]])
 
 # dem_hr<-crop(dem_hr,dem)
