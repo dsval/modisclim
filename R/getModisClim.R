@@ -217,7 +217,7 @@ fileIds<-mapply(askids,datestarts,dateends,MoreArgs = list(DNB=DNB))
 	
 
 end.time<-Sys.time()
-cat("time taken downloading:",end.time-start.time	,"\n")
+cat("time taken downloading:",difftime(end.time,start.time,'mins'),'mins',"\n")
 start.time<-Sys.time()
 ########################################################################
 #3.read the data, ....mapply is working faster than overay wth a rasterstack
@@ -502,7 +502,7 @@ if(is.null(cl)){
 }
 
 end.time<-Sys.time()
-cat("time taken reading the datasets:",end.time-start.time	,"\n")
+cat("time taken reading the datasets:",difftime(end.time,start.time,'mins'),'mins',"\n")
 ########################################################################
 #3.Organize the layers
 ########################################################################
@@ -565,7 +565,7 @@ if(is.null(cl)){
 	cl_b_T<-tiddyup_par(cl_b_T,lst_mod[[1]])
 	}
 	end.time<-Sys.time()
-	cat("time taken organizing the layers:",end.time-start.time	,"\n")
+	cat("time taken organizing the layers:",difftime(end.time,start.time,'mins'),'mins'	,"\n")
 ########################################################################
 #3.gap fill daily adiabatic Lapse rate asuming meain in 3 neigthbour pixels
 ########################################################################
@@ -669,7 +669,7 @@ if(is.null(cl)){
 	LR_uclds<-parallel:::clusterMap(cl = cl, fun=calc_ub_cld_rast, cl_b_t=cl_b_T,cld_b_ht=cl_b_hgt,MoreArgs = list(dem=dem))	
 }
 end.time<-Sys.time()
-cat("time taken computing ELR under the clouds:",end.time-start.time	,"\n")
+cat("time taken computing ELR under the clouds:",difftime(end.time,start.time,'mins'),'mins'	,"\n")
 start.time<-Sys.time()
 ########################################################################
 #3.calculate average LR between cSky and cloudy sky
@@ -697,6 +697,9 @@ for(i in 1:length(LR_avg)){int_day[[i]]<-LR_avg[[i]][[1]]};
 for(i in 1:length(LR_avg)){LR_day[[i]]<-LR_avg[[i]][[2]]};
 #rm(LR_avg)
 gc()
+end.time<-Sys.time()
+cat("time taken averaging ELR from clear sky and under the clouds:",difftime(end.time,start.time,'mins'),'mins'	,"\n")
+start.time<-Sys.time()
 ########################################################################
 #3.gap fill daily adiabatic Lapse rate asuming meain in 3 neigthbour pixels
 ########################################################################
@@ -709,16 +712,26 @@ if(is.null(cl)){
 	int_day<-parallel:::clusterMap(cl = cl, fun=gapfill, int_day)	
 	LR_day<-parallel:::clusterMap(cl = cl, fun=gapfill, LR_day)
 }
-
+gc()
+end.time<-Sys.time()
+cat("time taken gapfilling:",difftime(end.time,start.time,'mins'),'mins'	,"\n")
+start.time<-Sys.time()
 #averaging to daily
 
-int_day<-setZ(stack(int_day),zdates_atm)
-int_day<-zApply(int_day,as.Date(zdates_atm),mean)
-LR_day<-setZ(stack(LR_day),zdates_atm)
-LR_day<-zApply(LR_day,as.Date(zdates_atm),mean)
 
 
-
+if(is.null(cl)){
+	int_day<-setZ(stack(int_day),zdates_atm)
+	int_day<-zApply(int_day,as.Date(zdates_atm),mean)
+	LR_day<-setZ(stack(LR_day),zdates_atm)
+	LR_day<-zApply(LR_day,as.Date(zdates_atm),mean)
+}else{
+	int_day<-setZ(stack(int_day),zdates_atm)
+	int_day<-aggRaster(int_day,func = "mean",xout='daily',cl=cl,varnam='int_day',longname='int_day_gaps', varunit='C')
+	LR_day<-setZ(stack(LR_day),zdates_atm)
+	LR_day<-aggRaster(LR_day,func = "mean",xout='daily',cl=cl,varnam='LR_day',longname='LR_day_gaps', varunit='C/m')
+}
+gc()
 
 gapfillgauss<-function(x){
 	fill.na <- function(x, i=5) {
@@ -797,12 +810,20 @@ if(is.null(cl)){
 
 #averaging to daily
 
-int_VR_day<-setZ(stack(int_VR_day),zdates_atm)
-int_VR_day<-zApply(int_VR_day,as.Date(zdates_atm),mean)
-VR_day<-setZ(stack(VR_day),zdates_atm)
-VR_day<-zApply(VR_day,as.Date(zdates_atm),mean)
 
 
+if(is.null(cl)){
+	int_VR_day<-setZ(stack(int_VR_day),zdates_atm)
+	int_VR_day<-zApply(int_VR_day,as.Date(zdates_atm),mean)
+	VR_day<-setZ(stack(VR_day),zdates_atm)
+	VR_day<-zApply(VR_day,as.Date(zdates_atm),mean)
+}else{
+	int_VR_day<-setZ(stack(int_VR_day),zdates_atm)
+	int_VR_day<-aggRaster(int_VR_day,func = "mean",xout='daily',cl=cl,varnam='int_VR_day',longname='int_VR_day_gaps', varunit='kg/kg')
+	VR_day<-setZ(stack(VR_day),zdates_atm)
+	VR_day<-aggRaster(VR_day,func = "mean",xout='daily',varnam='VR_day',cl=cl,longname='VR_day_gaps', varunit='kg/kg/m')
+}
+gc()
 if(is.null(cl)){
 	int_VR_day<-mapply(gapfillgauss,as.list(int_VR_day))
 	VR_day<-mapply(gapfillgauss,as.list(VR_day))
